@@ -1,133 +1,130 @@
 import os
-import mpv
-from pynput.keyboard import Key, Listener
+import sys
+import threading
 import time
 import vlc
-import pygame
-from gpiozero import Button, LED
-from signal import pause
 
-led = LED(16)
-led.on()
+# --- Configuration ---
+AUDIO_FILE = "heartbeat.mp3"  # Path to your MP3 file
+SPEED_INTERVAL_SEC = 3
+SPEED_INCREASE_PCT = 0.10   # 10% per step
+MAX_SPEED = 2.0             # 200%
+MIN_SPEED = 0.7             # 40%
 
+# Raspberry Pi GPIO (only used on Pi)
+POWER_PIN = 3   # GPIO 3 (BCM) - high to power the button
+BUTTON_PIN = 4  # GPIO 4 (BCM) - monitored for button press
+INCREASE_SPEED_PIN = 5  # GPIO 5 (BCM) - monitored for button press
 
+IS_WINDOWS = sys.platform == "win32"
 
-print("Press the button to see a message. Press Ctrl+C to exit.")
+# --- GPIO setup (Raspberry Pi only) ---
+power_pin = None
+button_play_audio = None
+button_increase_speed = None
 
-# Pause the script to wait for events
-pause()
+global player
+instance = vlc.Instance()
+path = os.path.abspath(AUDIO_FILE)
+if not os.path.isfile(path):
+    print(f"Audio file not found: {path}")
+player = instance.media_player_new() 
+media = instance.media_new(path)
+media.add_option('input-repeat=65535') # Loop infinitely
+player.set_media(media)
+global rate
+rate = 1.0 
 
-# # Initialize MPV player
-# device= "bcm2835 Headphones"
-# player = mpv.MPV(ytdl=False, input_default_bindings=True, audio_device=device, input_vo_keyboard=True)
-# speed = 1.0
-# duration_seconds = 1  # Duration to play the audio in seconds
+DEBOUNCE_SEC = 0.2
+if not IS_WINDOWS:
+    from gpiozero import Button, LED
+    from signal import pause
+    power_pin = LED(POWER_PIN)
+    power_pin.on()
+    button_play_audio = Button(BUTTON_PIN, pull_up=False, bounce_time=DEBOUNCE_SEC)
+    button_increase_speed = Button(INCREASE_SPEED_PIN, pull_up=False, bounce_time=DEBOUNCE_SEC)
+else:
+    from pynput.keyboard import Key, Listener
 
-# # The MP3 file you want to play
-# audio_file_path = 'heartbeat.mp3' # Update with your file's actual path
-# filename = audio_file_path
-
-# sleep_seconds = 0.1
-# rate = 0.1
-# pygame.mixer.init()
-
-# # Start playing the music
-# # loops=0 plays it once (default), start=0.0 starts from the beginning
-# while True:
-
-
-
-#     # Load the music file
-#     pygame.mixer.music.load(filename)
-#     pygame.mixer.music.play(loops=0, start=0.0)
-
-#     print(f"Playing '{filename}' for {duration_seconds} seconds...")
-
-#     # Keep the program running for the specified duration using sleep
-#     time.sleep(duration_seconds)
-
-#     # Stop the music after the duration
-#     pygame.mixer.music.stop()
-#     print("Playback stopped.")
-#     sleep_seconds += rate
-#     time.sleep(sleep_seconds)
-#     if sleep_seconds > 1.5:
-#         rate = -0.1
-#     elif sleep_seconds < 0.1:
-#         rate = 0.1
-
-# # Optional: Quit the mixer and pygame
-
-# pygame.mixer.quit()
-# pygame.quit()
+_playing_lock = threading.Lock()
 
 
+def play_mp3():
+    """Play the MP3 in a continuous loop with VLC; ramp speed by 10% every 3s up to 300%."""
+    global player
+    if not player.is_playing():
+        with _playing_lock: 
+            try:
+                print("Playing audio.")
+                player.play( )
+                time.sleep(0.5) # Wait for the audio to start playing
+            except Exception as e:
+                print(f"Playback error: {e}")
 
 
+def increase_speed():
+    """Increase the speed of the audio playback (Pi button; placeholder)."""
+    global player
+    global rate
+    if player.is_playing():
+        with _playing_lock: 
+            try:
+                print("Increasing speed.")
+                rate = min(rate * (1 + SPEED_INCREASE_PCT), MAX_SPEED)
+                if player.set_rate(rate) == -1:
+                    print(f"Could not set rate to {rate:.2f}x")
+                else:
+                    print(f"Playback speed: {rate * 100:.0f}%")
+            except Exception as e:
+                print(f"Increase speed error: {e}")
 
 
+def decrease_speed():
+    """Decrease the speed of the audio playback."""
+    global player
+    global rate
+    if player.is_playing():
+        print("Decreasing speed.") 
+        rate = max(rate * (1 - SPEED_INCREASE_PCT), MIN_SPEED)
+        if player.set_rate(rate) == -1:
+            print(f"Could not set rate to {rate:.2f}x")
+        else:
+            print(f"Playback speed: {rate * 100:.0f}%")
 
+def on_key_press(key):
+    """Windows: trigger play on Space."""
+    try:
+        if key == Key.space:
+            on_play_triggered()
+        elif key == Key.up:
+            on_increase_speed_triggered()
+        elif key == Key.down:
+            on_decrease_speed_triggered()
+    except AttributeError:
+        pass
 
+def on_play_triggered():
+    """Start playback (from GPIO button or keyboard)."""
+    threading.Thread(target=play_mp3, daemon=True).start()
+def on_increase_speed_triggered():
+    """Called when the increase-speed button on pin 5 is pressed (Pi only)."""
+    print("Increase speed button pressed.")
+    threading.Thread(target=increase_speed, daemon=True).start()
+def on_decrease_speed_triggered():
+    """Decrease the speed of the audio playback."""
+    threading.Thread(target=decrease_speed, daemon=True).start()
 
-
-
-
-
-
-# print(f"Playing audio: {audio_file_path}")
-# print("Press 'g' to increase speed, 'f' to decrease speed. Press 'Esc' to exit.")
-
-# # Start playing the audio file
-# ret = player.play(audio_file_path)
-# while True:
-#     pass
-# instance = vlc.Instance()
-
-# # Create a Media Player object
-# player = instance.media_player_new()
-
-# # Create a Media object from the file path
-# media = instance.media_new(audio_file_path)
-
-# # Set the media to the player
-# player.set_media(media)
-
-# # Start playback
-# player.play()
-
-# # Wait for the media to start playing
-# time.sleep(1)
-
-# # Initial playback rate
-# rate = 1.0
-
-# try:
-#     while True:
-#         # Increase the rate by 10% (multiply by 1.1)
-#         rate *= 1.1
-        
-#         # Set the new playback rate
-#         # The set_rate method returns 0 on success, -1 on error
-#         if player.set_rate(rate) == -1:
-#             print(f"Error: Could not set rate to {rate:.2f}x. The maximum speed might be reached or exceeded.")
-#             # You might choose to break the loop or cap the speed here
-#             break
-            
-#         print(f"Current playback speed: {rate:.2f}x")
-        
-#         # Wait for 1 second before increasing the speed again
-#         time.sleep(2)
-        
-#         # Check if the player is still playing
-#         # is_playing() returns 0 if stopped, 1 if playing/paused
-#         if player.is_playing() == 0:
-#             # If the media has ended, reset rate and restart for a continuous loop
-#             player.set_media(media) # Re-set media to ensure loop
-#             player.play()
-#             rate = 1.0 # Reset rate for the new loop iteration
-#             time.sleep(1) # Wait for it to start again
-            
-# except KeyboardInterrupt:
-#     # Stop the player when interrupted by the user (e.g., Ctrl+C)
-#     player.stop()
-#     print("Playback stopped.")
+if IS_WINDOWS:
+    print("Windows mode. Press SPACE to play the MP3 and up to increase speed. Ctrl+C to exit.")
+    listener = Listener(on_press=on_key_press)
+    listener.start()
+    try:
+        while True:
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        listener.stop()
+else:
+    button_play_audio.when_pressed = on_play_triggered
+    button_increase_speed.when_pressed = on_increase_speed_triggered
+    print("Raspberry Pi mode. Pin 3 is high. Press the button (pin 4) to play. Ctrl+C to exit.")
+    pause()
