@@ -3,6 +3,9 @@ import sys
 import threading
 import time
 import vlc
+from gpiod.line import Bias, Direction, Value
+import gpiod
+
 
 # --- Configuration ---
 AUDIO_FILE = "heartbeat.mp3"  # Path to your MP3 file
@@ -12,41 +15,32 @@ MAX_SPEED = 2.0             # 200%
 MIN_SPEED = 0.7             # 40%
 
 # Raspberry Pi GPIO (only used on Pi)
-POWER_PIN = 3   # GPIO 3 (BCM) - high to power the button
-BUTTON_PIN = 4  # GPIO 4 (BCM) - monitored for button press
+OUTPUT_PIN_FOR_GROUND = 17
+button_play_audio = 4
 INCREASE_SPEED_PIN = 5  # GPIO 5 (BCM) - monitored for button press
 
 IS_WINDOWS = sys.platform == "win32"
 
-# --- GPIO setup (Raspberry Pi only) ---
-power_pin = None
-button_play_audio = None
-button_increase_speed = None
-
 global player
 instance = vlc.Instance()
+if instance is None:
+    print("Could not create VLC instance.")
+    sys.exit(1)
+
 path = os.path.abspath(AUDIO_FILE)
 if not os.path.isfile(path):
     print(f"Audio file not found: {path}")
-player = instance.media_player_new() 
+    sys.exit(1)
+
+player = instance.media_player_new()
 media = instance.media_new(path)
 media.add_option('input-repeat=65535') # Loop infinitely
 player.set_media(media)
 global rate
 rate = 1.0 
-
-DEBOUNCE_SEC = 0.2
-if not IS_WINDOWS:
-    from gpiozero import Button, LED
-    from signal import pause
-    power_pin = LED(POWER_PIN)
-    power_pin.on()
-    button_play_audio = Button(BUTTON_PIN, pull_up=False, bounce_time=DEBOUNCE_SEC)
-    button_increase_speed = Button(INCREASE_SPEED_PIN, pull_up=False, bounce_time=DEBOUNCE_SEC)
-else:
-    from pynput.keyboard import Key, Listener
-
+CHIP_NAME = 'gpiochip0'
 _playing_lock = threading.Lock()
+
 
 
 def play_mp3():
@@ -60,6 +54,67 @@ def play_mp3():
                 time.sleep(0.5) # Wait for the audio to start playing
             except Exception as e:
                 print(f"Playback error: {e}")
+
+
+
+DEBOUNCE_SEC = 0.2
+if not IS_WINDOWS:
+    chip = None
+    output_line = None
+    button_line = None
+    try:
+        # Open the GPIO chip
+        chip = gpiod.Chip("/dev/gpiochip0")
+
+        # Request the output line (HIGH / 3.3V)
+        output_line = chip.request_lines(
+            config={
+                OUTPUT_PIN_FOR_GROUND: gpiod.LineSettings(
+                    direction=Direction.OUTPUT,
+                    output_value=Value.INACTIVE,
+                )
+            },
+            consumer="output_control",
+        )
+
+        # Request the input line with internal pull-up (button to GND when pressed)
+        button_line = chip.request_lines(
+            config={
+                button_play_audio: gpiod.LineSettings(
+                    direction=Direction.INPUT,
+                    bias=Bias.PULL_UP,
+                )
+            },
+            consumer="button_detect",
+        )
+
+        print(f"Set GPIO {OUTPUT_PIN_FOR_GROUND} (physical pin 18) to 3.3V (HIGH)")
+        print(f"Monitoring button press on GPIO {button_play_audio}")
+
+        while True:
+            # Read the input line value
+            # Value.ACTIVE (High) means the button is NOT pressed (due to pull-up)
+            # Value.INACTIVE (Low) means the button IS pressed (connected to GND)
+            button_state = button_line.get_values()[0]
+            
+            if button_state == Value.INACTIVE:
+                print("Button pressed!")
+                threading.Thread(target=play_mp3, daemon=True).start()
+            time.sleep(0.1) # Small delay to prevent excessive CPU usage
+    except KeyboardInterrupt:
+        print("Program stopped by user")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+    finally:
+        if output_line:
+            output_line.release()
+        if button_line:
+            button_line.release()
+        if chip:
+            chip.close()
+else:
+    from pynput.keyboard import Key, Listener
+
 
 
 def increase_speed():
@@ -124,7 +179,4 @@ if IS_WINDOWS:
     except KeyboardInterrupt:
         listener.stop()
 else:
-    button_play_audio.when_pressed = on_play_triggered
-    button_increase_speed.when_pressed = on_increase_speed_triggered
-    print("Raspberry Pi mode. Pin 3 is high. Press the button (pin 4) to play. Ctrl+C to exit.")
-    pause()
+    print("Raspberry Pi mode. GPIO {OUTPUT_PIN_FOR_GROUND} is high. Press the button (GPIO {button_play_audio}) to play. Ctrl+C to exit.")
