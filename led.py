@@ -1,12 +1,11 @@
 from __future__ import print_function
 from __future__ import division
 
-from pythonping import ping
 import platform
+from typing import Any, cast
 import numpy as np
 import config
 import time
-import struct
 
 # ESP8266 uses WiFi communication
 if config.DEVICE == 'esp8266':
@@ -14,25 +13,12 @@ if config.DEVICE == 'esp8266':
     _sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 # Raspberry Pi controls the LED strip directly
 elif config.DEVICE == 'pi':
-    import neopixel
-    strip = neopixel.Adafruit_NeoPixel(config.N_PIXELS, config.LED_PIN,
-                                       config.LED_FREQ_HZ, config.LED_DMA,
-                                       config.LED_INVERT, config.BRIGHTNESS)
+    from rpi_ws281x import Adafruit_NeoPixel
+    strip = Adafruit_NeoPixel(config.N_PIXELS, config.LED_PIN,
+                              config.LED_FREQ_HZ, config.LED_DMA,
+                              config.LED_INVERT, config.BRIGHTNESS)
     strip.begin()
-elif config.DEVICE == 'blinkstick':
-    from blinkstick import blinkstick
-    import signal
-    import sys
-    #Will turn all leds off when invoked.
-    def signal_handler(signal, frame):
-        all_off = [0]*(config.N_PIXELS*3)
-        stick.set_led_data(0, all_off)
-        sys.exit(0)
 
-    stick = blinkstick.find_first()
-    # Create a listener that turns the leds off when the program terminates
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
 
 _gamma = np.load(config.GAMMA_TABLE_PATH)
 """Gamma lookup table used for nonlinear brightness correction"""
@@ -106,35 +92,9 @@ def _update_pi():
         if np.array_equal(p[:, i], _prev_pixels[:, i]):
             continue
         #strip._led_data[i] = rgb[i]
-        strip._led_data[i] = int(rgb[i])
+        cast(Any, strip)._led_data[i] = int(rgb[i])
     _prev_pixels = np.copy(p)
     strip.show()
-
-def _update_blinkstick():
-    """Writes new LED values to the Blinkstick.
-        This function updates the LED strip with new values.
-    """
-    global pixels
-    
-    # Truncate values and cast to integer
-    pixels = np.clip(pixels, 0, 255).astype(int)
-    # Optional gamma correction
-    p = _gamma[pixels] if config.SOFTWARE_GAMMA_CORRECTION else np.copy(pixels)
-    # Read the rgb values
-    r = p[0][:].astype(int)
-    g = p[1][:].astype(int)
-    b = p[2][:].astype(int)
-
-    #create array in which we will store the led states
-    newstrip = [None]*(config.N_PIXELS*3)
-
-    for i in range(config.N_PIXELS):
-        # blinkstick uses GRB format
-        newstrip[i*3] = g[i]
-        newstrip[i*3+1] = r[i]
-        newstrip[i*3+2] = b[i]
-    #send the data to the blinkstick
-    stick.set_led_data(0, newstrip)
 
 
 def update():
@@ -143,8 +103,6 @@ def update():
         _update_esp8266()
     elif config.DEVICE == 'pi':
         _update_pi()
-    elif config.DEVICE == 'blinkstick':
-        _update_blinkstick()
     else:
         raise ValueError('Invalid device selected')
 
@@ -154,37 +112,60 @@ def update():
 def send_udp_color(ip, port, num_leds, r, g, b):
     """Sends a UDP packet to set all LEDs to a specific RGB color using WARLS protocol."""
     
-    # # The WARLS protocol requires a specific header.
-    # # Byte 0: Protocol ID (1 = WARLS)
-    # # Byte 1: LED start index (0, for the entire strip)
-    # header = bytes([2, 1])
+    # The WARLS protocol requires a specific header.
+    # Byte 0: Protocol ID (1 = WARLS)
+    # Byte 1: LED start index (0, for the entire strip)
+    header = bytes([2, 1])
     
-    # # Create the data payload for the LEDs
-    # # Each LED requires 3 bytes: Red, Green, Blue
-    # led_data = bytes()
-    # for _ in range(num_leds):
-    #     led_data += bytes([r, g, b])
+    # Create the data payload for the LEDs
+    # Each LED requires 3 bytes: Red, Green, Blue
+    led_data = bytes()
+    for _ in range(num_leds):
+        led_data += bytes([r, g, b])
         
-    # # Combine header and LED data
-    # packet = header + led_data
+    # Combine header and LED data
+    packet = header + led_data
     
-    # # Send the UDP packet
-    # try:
-    #     _sock.sendto(packet, (config.UDP_IP, config.UDP_PORT))
-    #     print(f"Sent UDP packet to {ip}:{port} to set all {num_leds} LEDs to RGB({r}, {g}, {b})")
-    # except socket.error as e:
-    #     print(f"Error sending UDP packet: {e}")
-    # finally:
-    #     _sock.close()
+    # Send the UDP packet
+    try:
+        _sock.sendto(packet, (config.UDP_IP, config.UDP_PORT))
+        print(f"Sent UDP packet to {ip}:{port} to set all {num_leds} LEDs to RGB({r}, {g}, {b})")
+    except socket.error as e: # type: ignore
+        print(f"Error sending UDP packet: {e}")
+    finally:
+        _sock.close()
 
 
 
-    # while True:
-    #     m = bytes([2,1,255, 255, 0, 255, 0, 0])
-    #     _sock.sendto(m, (config.UDP_IP, config.UDP_PORT))
-    #     time.sleep(.1)
+    while True:
+        m = bytes([2,1,255, 255, 0, 255, 0, 0])
+        _sock.sendto(m, (config.UDP_IP, config.UDP_PORT))
+        time.sleep(.1)
 
-
+def send_udp_led_data(leds):
+    """Sends a UDP packet to set the LED data using WARLS protocol."""
+    
+    # The WARLS protocol requires a specific header.
+    # Byte 0: Protocol ID (1 = WARLS)
+    # Byte 1: LED start index (0, for the entire strip)
+    header = bytes([2, 1])
+    
+    # Create the data payload for the LEDs
+    # Each LED requires 3 bytes: Red, Green, Blue
+    led_data = bytes()
+    for led in leds:
+        led_data += bytes([led[0], led[1], led[2]])
+        
+    # Combine header and LED data
+    packet = header + led_data
+    
+    # Send the UDP packet
+    try:
+        _sock.sendto(packet, (config.UDP_IP, config.UDP_PORT))
+    except socket.error as e:
+        print(f"Error sending UDP packet: {e}")
+    finally:
+        _sock.close()
 
 # Execute this file to run a LED strand test
 # If everything is working, you should see a red, green, and blue pixel scroll

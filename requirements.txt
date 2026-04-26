@@ -1,2 +1,20 @@
+# --- Core (audio DSP, visualization, config) ---
+numpy>=1.24
+scipy>=1.10
 python-vlc>=3.0.0
+pyaudio>=0.2.13
+pythonping>=1.1.4
+
+# --- Raspberry Pi: GPIO + NeoPixel / WS281x + Blinka (board pin names) ---
+gpiod>=2.0
+Adafruit-Blinka>=8.0
+adafruit-circuitpython-neopixel>=6.3
+rpi-ws281x>=4.0
 adafruit-circuitpython-led-animation>=2.12
+
+# --- Optional hardware: use when config.DEVICE == 'blinkstick' ---
+blinkstick>=1.2
+
+# --- Optional desktop GUI: use when config.USE_GUI is True (needs a Qt binding) ---
+pyqtgraph>=0.13
+PySide6>=6.5

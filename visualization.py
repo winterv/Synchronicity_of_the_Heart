@@ -165,9 +165,9 @@ def visualize_spectrum(y):
     diff = y - _prev_spectrum
     _prev_spectrum = np.copy(y)
     # Color channel mappings
-    r = r_filt.update(y - common_mode.value)
-    g = np.abs(diff)
-    b = b_filt.update(np.copy(y))
+    r = np.asarray(r_filt.update(y - common_mode.value), dtype=np.float64)
+    g = np.asarray(np.abs(diff), dtype=np.float64)
+    b = np.asarray(b_filt.update(np.copy(y)), dtype=np.float64)
     # Mirror the color channels for symmetric output
     r = np.concatenate((r[::-1], r))
     g = np.concatenate((g[::-1], g))
@@ -252,7 +252,7 @@ visualization_effect = visualize_spectrum
 """Visualization effect to display on the LED strip"""
 
 
-if __name__ == '__main__':
+def Start_Audio_Visualization():
     if config.USE_GUI:
         import pyqtgraph as pg
         from pyqtgraph.Qt import QtGui, QtCore, QtWidgets
