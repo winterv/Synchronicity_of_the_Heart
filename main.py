@@ -20,7 +20,8 @@ from adafruit_led_animation.animation.rainbow import Rainbow
 from adafruit_led_animation.animation.pulse import Pulse
 from adafruit_blinka.board.raspberrypi import raspi_40pin as pi_board
 
-
+global engaged
+engaged = False
 global red_active
 global green_active
 global blue_active
@@ -55,15 +56,15 @@ if not os.path.isfile(Heartbeat_path):
     print(f"Audio file not found: {Heartbeat_path}")
 if not os.path.isfile(Background_path):
     print(f"Audio file not found: {Background_path}")
-player = instance.media_player_new() if instance else None
+heartbeat_player = instance.media_player_new() if instance else None
 background_player = instance.media_player_new() if instance else None
 background_media = instance.media_new(Background_path) if instance else None
 background_player.set_media(background_media) if background_player and background_media else None
 background_player.audio_set_volume(30) if background_player and background_player.audio_set_volume else None
 media = instance.media_new(Heartbeat_path) if instance else None
 #media.add_option('input-repeat=65535') # Loop infinitely
-player.set_media(media) if player and media else None
-player.audio_set_volume(100) if player and player.audio_set_volume else None
+heartbeat_player.set_media(media) if heartbeat_player and media else None
+heartbeat_player.audio_set_volume(100) if heartbeat_player and heartbeat_player.audio_set_volume else None
 
 _playing_lock = threading.Lock()
 
@@ -87,22 +88,22 @@ def set_bluetooth_output(player):
             # Look for "Bluetooth" or your device's specific name (e.g., "EWA")
             if "Bluetooth" in device_description or "bluez" in device_name:
                 print(f"✅ Found Bluetooth Device: {device_description}")
-                player.audio_output_device_set(None, device_name)
+                heartbeat_player.audio_output_device_set(None, device_name) if heartbeat_player and heartbeat_player.audio_output_device_set else None
                 return True
-            curr = curr.contents.next
+            curr = curr.contents.next   
     print("❌ Bluetooth device not found in VLC device list.")
     return False
-set_bluetooth_output(player)  
+set_bluetooth_output(heartbeat_player)  
 
 
 
 def play_mp3():
     """Play the MP3 in a continuous loop with VLC; ramp speed by 10% ever y 3s up to 300%."""
-    global player
+    global heartbeat_player
     global player_delay 
     global playback_rate
     global playing
-    if player is None:
+    if heartbeat_player is None:
         print("VLC media player not initialized; skipping playback loop.")
         return
     if not playing:
@@ -113,13 +114,13 @@ def play_mp3():
             time.sleep(0.1) # Wait for the audio to start playing
             #with _playing_lock: 
             try:                
-                player.set_rate(playback_rate)
-                player.play( )
+                heartbeat_player.set_rate(playback_rate)
+                heartbeat_player.play( )
             except Exception as e:
                 print(f"Playback error: {e}")
             delay = 0.75/playback_rate
             time.sleep(delay)
-            player.stop()
+            heartbeat_player.stop()
             print(f"Time taken: {(time.time() - start_time):.2f}s, player_delay: {(delay):.2f}s, playback_rate: {(playback_rate):.2f}")
 
 
@@ -210,35 +211,31 @@ def sym_pulse(local_pixels, hue_center, hue_range, speed=0.5):
     offset2 = 32
 
     while True:
-        # Loop through only half to generate pattern
-        for i in range(0,(LED_COUNT // 2)+1):
-            # Normalize position (0.0 to 1.0)
-            dist = i / (LED_COUNT // 2)
-            
-            # Color Rotation within range
-            color_idx = (hue_center + int(dist * hue_range) + color_offset) % 256
-            base_color = wheel(color_idx)
-            
-            # Fading based on sine wave
-            pulse = (math.sin(time.monotonic() * 5 + dist * 10) + 1) / 2
-            final_color = tuple(int(c * pulse) for c in base_color)
-            
-            # Apply to both halves
-            if i == 0 :
-                local_pixels[offset0+0] = final_color
-                local_pixels[offset1+0] = final_color
-                local_pixels[offset2+0] = final_color
-            elif i == 8:
-                local_pixels[offset0+8] = final_color
-                local_pixels[offset1+8] = final_color
-                local_pixels[offset2+8] = final_color
-            else:
-                local_pixels[offset0+i] = final_color
-                local_pixels[offset1+i] = final_color
-                local_pixels[offset2+i] = final_color
-                local_pixels[offset0+16 - i] = final_color
-                local_pixels[offset1+16 - i] = final_color
-                local_pixels[offset2+16 - i] = final_color
+        if not engaged:
+            for i in range(0,(LED_COUNT // 2)+1):
+                dist = i / (LED_COUNT // 2)
+                # Color Rotation within range
+                color_idx = (hue_center + int(dist * hue_range) + color_offset) % 256
+                base_color = wheel(color_idx)
+                # Fading based on sine wave
+                pulse = (math.sin(time.monotonic() * 5 + dist * 10) + 1) / 2
+                final_color = tuple(int(c * pulse) for c in base_color)
+                # Apply to both halves
+                if i == 0 :
+                    local_pixels[offset0+0] = final_color
+                    local_pixels[offset1+0] = final_color
+                    local_pixels[offset2+0] = final_color
+                elif i == 8:
+                    local_pixels[offset0+8] = final_color
+                    local_pixels[offset1+8] = final_color
+                    local_pixels[offset2+8] = final_color
+                else:
+                    local_pixels[offset0+i] = final_color
+                    local_pixels[offset1+i] = final_color
+                    local_pixels[offset2+i] = final_color
+                    local_pixels[offset0+16 - i] = final_color
+                    local_pixels[offset1+16 - i] = final_color
+                    local_pixels[offset2+16 - i] = final_color
 
         led.send_udp_led_data(local_pixels)
         color_offset = (color_offset + 1) % 256
@@ -246,23 +243,25 @@ def sym_pulse(local_pixels, hue_center, hue_range, speed=0.5):
 
 def heart_lights_updater():
     global timing_error
-    if timing_error < 20:
-        command_to_send = {
-                "seg": [
-                    {
-                        #fx = 227 is the ID for sound reactive effect
-                        "fx": 79,  # The ID of the effect/pattern for Chase
-                        "col": [(0,0,255)], # Primary color: Red (R, G, B)
-                        "pal": 63,
-                        "sx": speed,
-                        "ix": 28,
-                    }
-                ]
-            }
-        threading.Thread(target=control_pattern.send_wled_command_udp, args=(config.UDP_IP, config.UDP_PORT, command_to_send), daemon=True).start()
-    elif timing_error < 10:
-        background_player.play() if background_player and background_player.play else None
-
+    while True:
+        if timing_error < 20:
+            command_to_send = {
+                    "seg": [
+                        {
+                            #fx = 227 is the ID for sound reactive effect
+                            "fx": 79,  # The ID of the effect/pattern for Chase
+                            "col": [(0,0,255)], # Primary color: Red (R, G, B)
+                            "pal": 63,
+                            "sx": speed,
+                            "ix": 28,
+                        }
+                    ]
+                }
+            #threading.Thread(target=control_pattern.send_wled_command_udp, args=(config.UDP_IP, config.UDP_PORT, command_to_send), daemon=True).start()
+        if timing_error < 10:
+            background_player.play() if background_player and background_player.play else None
+            heartbeat_player.audio_set_volume(100) if heartbeat_player and heartbeat_player.audio_set_volume else None
+        time.sleep(0.01) 
 
 
 def wheel(pos):
@@ -333,9 +332,7 @@ def run_pulse(pulse1, pulse2, pulse3):
     duration = 20
     red_heart = PixelSubset(pixels, 0, 16) 
     green_heart = PixelSubset(pixels, 16, 32) 
-    blue_heart = PixelSubset(pixels, 32, 48) 
-
-
+    blue_heart = PixelSubset(pixels, 32, 48)
 
     while time.time() < start_time + duration:
         pulse1.animate()
@@ -364,9 +361,15 @@ pulse_animation_blue = Pulse(red_heart, speed=speed, period=period, color=Color(
 #threading.Thread(target=run_pulse, args=(pulse_animation_red, pulse_animation_green, pulse_animation_blue), daemon=False).start()
 NUM_PIXELS = 48
 
+# Button-sync timing state: must exist before threads read it (e.g. heart_lights_updater).
+time_red = 0.0
+time_green = 0.0
+time_blue = 0.0
+timing_error = 999_999_999
+
 heart_leds = [(0, 0, 0)] * NUM_PIXELS
 threading.Thread(target=sym_pulse, args=(heart_leds, 0, 256, 0.01), daemon=False).start()
-threading.Thread(target = heart_lights_updater).start()
+threading.Thread(target=heart_lights_updater, daemon=False).start()
 
 
 threading.Thread(target=play_mp3, daemon=True).start()
@@ -399,14 +402,6 @@ input_line = None
 
 # Open the GPIO chip
 chip = gpiod.Chip("/dev/gpiochip0")
-global time_red
-global time_green
-global time_blue
-global timing_error
-time_red=0
-time_green =0 
-time_blue =0
-timing_error = 999999999
 
 # Request the input line with internal pull-up (button to GND when pressed)
 input_line = chip.request_lines(
@@ -449,6 +444,7 @@ try:
         
         if button_state_red == Value.INACTIVE:
             print("Button red pressed!")
+            red_button_pressed = True
             #rainbow_animation.animate()
             #threading.Thread(target=play_mp3, daemon=True).start()
             WAIT_TIME = 0.02
@@ -459,6 +455,7 @@ try:
 
         elif button_state_green == Value.INACTIVE:
             print("Button green pressed!")
+            green_button_pressed = True
             WAIT_TIME = 0.02
             pixel_offset = 18
             #color_wipe(pixels, (255, 255, 255), WAIT_TIME, pixel_offset) # White
@@ -467,6 +464,7 @@ try:
 
         elif button_state_blue == Value.INACTIVE:
             print("Button blue pressed!")
+            blue_button_pressed = True
             WAIT_TIME = 0.02
             pixel_offset = 36
             #color_wipe(pixels, (255, 255, 255), WAIT_TIME, pixel_offset) # White
