@@ -17,8 +17,11 @@ audio input and control the LED strip directly.
 to control the leds connected to it.
 """
 
+UDP_IP_robot_hearts = '192.168.1.32'
+UDP_PORT_robot_hearts = 21324
+
 if DEVICE == 'esp8266':
-    UDP_IP = '192.168.68.137'
+    UDP_IP = '192.168.1.29'
     """IP address of the ESP8266. Must match IP in ws2812_controller.ino"""
     UDP_PORT = 21324
     """Port number used for socket communication between Python and ESP8266"""

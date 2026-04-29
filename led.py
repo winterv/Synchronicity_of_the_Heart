@@ -6,10 +6,9 @@ from typing import Any, cast
 import numpy as np
 import config
 import time
-
+import socket
 # ESP8266 uses WiFi communication
 if config.DEVICE == 'esp8266':
-    import socket
     _sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 # Raspberry Pi controls the LED strip directly
 elif config.DEVICE == 'pi':
@@ -127,19 +126,18 @@ def send_udp_color(ip, port, num_leds, r, g, b):
     packet = header + led_data
     
     # Send the UDP packet
+    _sock = None
     try:
+        _sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        _sock.connect((config.UDP_IP, config.UDP_PORT))
         _sock.sendto(packet, (config.UDP_IP, config.UDP_PORT))
         print(f"Sent UDP packet to {ip}:{port} to set all {num_leds} LEDs to RGB({r}, {g}, {b})")
     except socket.error as e: # type: ignore
         print(f"Error sending UDP packet: {e}")
     finally:
-        _sock.close()
+        if _sock is not None:
+            _sock.close()
 
-
-
-    while True:
-        m = bytes([2,1,255, 255, 0, 255, 0, 0])
-        _sock.sendto(m, (config.UDP_IP, config.UDP_PORT))
         time.sleep(.1)
 
 def send_udp_led_data(leds):
@@ -161,11 +159,11 @@ def send_udp_led_data(leds):
     
     # Send the UDP packet
     try:
-        _sock.sendto(packet, (config.UDP_IP, config.UDP_PORT))
+        _sock.sendto(packet, (config.UDP_IP_robot_hearts, config.UDP_PORT_robot_hearts))
     except socket.error as e:
         print(f"Error sending UDP packet: {e}")
-    finally:
-        _sock.close()
+    #finally:
+        #_sock.close()
 
 # Execute this file to run a LED strand test
 # If everything is working, you should see a red, green, and blue pixel scroll

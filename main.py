@@ -60,7 +60,6 @@ background_player = instance.media_player_new() if instance else None
 background_media = instance.media_new(Background_path) if instance else None
 background_player.set_media(background_media) if background_player and background_media else None
 background_player.audio_set_volume(30) if background_player and background_player.audio_set_volume else None
-background_player.play() if background_player and background_player.play else None
 media = instance.media_new(Heartbeat_path) if instance else None
 #media.add_option('input-repeat=65535') # Loop infinitely
 player.set_media(media) if player and media else None
@@ -121,7 +120,29 @@ def play_mp3():
             delay = 0.75/playback_rate
             time.sleep(delay)
             player.stop()
-            print(f"Time taken: {time.time() - start_time}, player_delay: {delay}, playback_rate: {playback_rate}")
+            print(f"Time taken: {(time.time() - start_time):.2f}s, player_delay: {(delay):.2f}s, playback_rate: {(playback_rate):.2f}")
+
+
+def Standard_heart_animation():
+    command_to_send = {
+        "seg": [
+            {
+                #fx = 227 is the ID for sound reactive effect
+                "col": [
+                    [0, 0, 255],
+                    [42, 15, 245],
+                    [0, 255, 0]], # Primary color: Red (R, G, B)
+                "fx": 29, # The ID of the effect/pattern for Heartbeat
+                "sx": 55,
+                "ix": 59,
+                "pal": 0,
+                "c1": 128,
+                "c2": 128,
+                "c3": 16,
+            }
+        ]
+    }
+    threading.Thread(target=control_pattern.send_wled_command_udp, args=(config.UDP_IP, config.UDP_PORT, command_to_send), daemon=True).start()
 
 
 def increase_speed():
@@ -145,10 +166,10 @@ def decrease_speed():
         except Exception as e:
             print(f"Decrease speed error: {e}")
 
-
+Standard_heart_animation()
 #*****************************LED Strip setup*************************************
 # BCM GPIO 18 = physical pin 12. Blinka Pi uses Dn names; GPn is for Pico, not in raspi_40pin.
-pixel_pin = pi_board.D18
+pixel_pin = pi_board.D10
 num_pixels = 48    # The number of LEDs in your strip
 
 # The order of the colors in the strip (can be GRB or RGB)
@@ -156,7 +177,7 @@ ORDER = neopixel.RGB
 pixels = neopixel.NeoPixel(
     cast(Any, pixel_pin),
     num_pixels,
-    brightness=0.2,
+    brightness=0.6,
     auto_write=False,
     pixel_order=ORDER,
 )
@@ -178,20 +199,24 @@ def color_wipe(pixels, color, wait, pixel_offset):
 #         #pixels.show()
 #         time.sleep(wait)
 
-def sym_pulse(local_pixels, hue_center, hue_range, speed=0.05):
+def sym_pulse(local_pixels, hue_center, hue_range, speed=0.5):
     """Animation: Symmetrical outward pulse"""
-    LED_COUNT = len(local_pixels)
+    LED_COUNT = int(len(local_pixels) / 3)
     hue_center = 0
     hue_range = 256
-    offset = 0
+    color_offset = 0    
+    offset0 = 0
+    offset1 = 16
+    offset2 = 32
+
     while True:
         # Loop through only half to generate pattern
-        for i in range((LED_COUNT // 2)):
+        for i in range(0,(LED_COUNT // 2)+1):
             # Normalize position (0.0 to 1.0)
             dist = i / (LED_COUNT // 2)
             
             # Color Rotation within range
-            color_idx = (hue_center + int(dist * hue_range) + offset) % 256
+            color_idx = (hue_center + int(dist * hue_range) + color_offset) % 256
             base_color = wheel(color_idx)
             
             # Fading based on sine wave
@@ -199,11 +224,45 @@ def sym_pulse(local_pixels, hue_center, hue_range, speed=0.05):
             final_color = tuple(int(c * pulse) for c in base_color)
             
             # Apply to both halves
-            local_pixels[i] = final_color
-            local_pixels[LED_COUNT - 1 - i] = final_color
-        local_pixels.show()
-        offset = (offset + 1) % 256
+            if i == 0 :
+                local_pixels[offset0+0] = final_color
+                local_pixels[offset1+0] = final_color
+                local_pixels[offset2+0] = final_color
+            elif i == 8:
+                local_pixels[offset0+8] = final_color
+                local_pixels[offset1+8] = final_color
+                local_pixels[offset2+8] = final_color
+            else:
+                local_pixels[offset0+i] = final_color
+                local_pixels[offset1+i] = final_color
+                local_pixels[offset2+i] = final_color
+                local_pixels[offset0+16 - i] = final_color
+                local_pixels[offset1+16 - i] = final_color
+                local_pixels[offset2+16 - i] = final_color
+
+        led.send_udp_led_data(local_pixels)
+        color_offset = (color_offset + 1) % 256
         time.sleep(speed)
+
+def heart_lights_updater():
+    global timing_error
+    if timing_error < 20:
+        command_to_send = {
+                "seg": [
+                    {
+                        #fx = 227 is the ID for sound reactive effect
+                        "fx": 79,  # The ID of the effect/pattern for Chase
+                        "col": [(0,0,255)], # Primary color: Red (R, G, B)
+                        "pal": 63,
+                        "sx": speed,
+                        "ix": 28,
+                    }
+                ]
+            }
+        threading.Thread(target=control_pattern.send_wled_command_udp, args=(config.UDP_IP, config.UDP_PORT, command_to_send), daemon=True).start()
+    elif timing_error < 10:
+        background_player.play() if background_player and background_player.play else None
+
 
 
 def wheel(pos):
@@ -271,10 +330,12 @@ def run_hue_pulse():
 
 def run_pulse(pulse1, pulse2, pulse3):
     start_time = time.time()
-    duration = 2
+    duration = 20
     red_heart = PixelSubset(pixels, 0, 16) 
     green_heart = PixelSubset(pixels, 16, 32) 
     blue_heart = PixelSubset(pixels, 32, 48) 
+
+
 
     while time.time() < start_time + duration:
         pulse1.animate()
@@ -282,9 +343,9 @@ def run_pulse(pulse1, pulse2, pulse3):
         pulse3.animate()
         time.sleep(0.01)
     
-    threading.Thread(target=sym_pulse, args=(red_heart, 0, 256, 0.001)).start()
-    threading.Thread(target=sym_pulse, args=(green_heart, 0, 256, 0.001)).start()
-    threading.Thread(target=sym_pulse, args=(blue_heart, 0, 256, 0.001)).start()
+    threading.Thread(target=sym_pulse, args=(red_heart, 0, 26, 0.01)).start()
+    threading.Thread(target=sym_pulse, args=(green_heart, 0, 256, 0.01)).start()
+    threading.Thread(target=sym_pulse, args=(blue_heart, 0, 56, 0.01)).start()
     
 
 red_heart = PixelMap(pixels, [(0, 16)]) 
@@ -299,7 +360,13 @@ rainbow_animation_red = Rainbow(red_heart, speed=0.01, period=2)
 pulse_animation_red = Pulse(green_heart, speed=speed, period=period, color=Color(0, 255, 0))
 pulse_animation_green = Pulse(blue_heart, speed=speed, period=period, color=Color(0, 0, 255))
 pulse_animation_blue = Pulse(red_heart, speed=speed, period=period, color=Color(255, 0, 0))
-threading.Thread(target=run_pulse, args=(pulse_animation_red, pulse_animation_green, pulse_animation_blue), daemon=False).start()
+
+#threading.Thread(target=run_pulse, args=(pulse_animation_red, pulse_animation_green, pulse_animation_blue), daemon=False).start()
+NUM_PIXELS = 48
+
+heart_leds = [(0, 0, 0)] * NUM_PIXELS
+threading.Thread(target=sym_pulse, args=(heart_leds, 0, 256, 0.01), daemon=False).start()
+threading.Thread(target = heart_lights_updater).start()
 
 
 threading.Thread(target=play_mp3, daemon=True).start()
@@ -308,8 +375,10 @@ def synchronization_check():
     global time_red
     global time_green
     global time_blue
-    error = abs(time_red - time_green) + abs(time_red - time_blue) + abs(time_green - time_blue)
-    print(f"Error: {error}")
+    global timing_error
+    if time_red and time_green and time_blue:
+        timing_error = abs(time_red - time_green) + abs(time_red - time_blue) + abs(time_green - time_blue)
+        print(f"Error: {timing_error}")
         
 
 #*****************************button setup*************************************
@@ -319,9 +388,9 @@ def synchronization_check():
 GPIO_CHIP = "gpiochip0"
 OUTPUT_PIN = 4
 OUTPUT_1_PIN = 27
-INPUT_RED_BUTTON = 17
-INPUT_GREEN_BUTTON = 18
-INPUT_BLUE_BUTTON = 22
+INPUT_RED_BUTTON = 26
+INPUT_GREEN_BUTTON = 24
+INPUT_BLUE_BUTTON = 17
 INPUT_UP_BUTTON = 14
 INPUT_DOWN_BUTTON = 15
 chip = None
@@ -330,21 +399,14 @@ input_line = None
 
 # Open the GPIO chip
 chip = gpiod.Chip("/dev/gpiochip0")
-
-# Request the output line (HIGH / 3.3V)
-output_line = chip.request_lines(
-    config={
-        OUTPUT_PIN: gpiod.LineSettings(
-            direction=Direction.OUTPUT,
-            output_value=Value.INACTIVE,
-        ),
-        OUTPUT_1_PIN: gpiod.LineSettings(
-            direction=Direction.OUTPUT,
-            output_value=Value.INACTIVE,
-        )
-    },
-    consumer="output_control",
-)
+global time_red
+global time_green
+global time_blue
+global timing_error
+time_red=0
+time_green =0 
+time_blue =0
+timing_error = 999999999
 
 # Request the input line with internal pull-up (button to GND when pressed)
 input_line = chip.request_lines(
@@ -383,17 +445,15 @@ try:
         button_state_blue = input_line.get_values()[2]
         button_state_up = input_line.get_values()[3]
         button_state_down = input_line.get_values()[4]
-        global time_red
-        global time_green
-        global time_blue
+      
         
         if button_state_red == Value.INACTIVE:
-            print("Button 0 pressed!")
+            print("Button red pressed!")
             #rainbow_animation.animate()
-            threading.Thread(target=play_mp3, daemon=True).start()
+            #threading.Thread(target=play_mp3, daemon=True).start()
             WAIT_TIME = 0.02
             pixel_offset = 0
-            color_wipe(pixels, (255, 255, 255), WAIT_TIME, pixel_offset) # White
+            #color_wipe(pixels, (255, 255, 255), WAIT_TIME, pixel_offset) # White
             time_red = time.time()
             synchronization_check()
 
@@ -401,7 +461,7 @@ try:
             print("Button green pressed!")
             WAIT_TIME = 0.02
             pixel_offset = 18
-            color_wipe(pixels, (255, 255, 255), WAIT_TIME, pixel_offset) # White
+            #color_wipe(pixels, (255, 255, 255), WAIT_TIME, pixel_offset) # White
             time_green = time.time()
             synchronization_check()
 
@@ -409,31 +469,30 @@ try:
             print("Button blue pressed!")
             WAIT_TIME = 0.02
             pixel_offset = 36
-            color_wipe(pixels, (255, 255, 255), WAIT_TIME, pixel_offset) # White
+            #color_wipe(pixels, (255, 255, 255), WAIT_TIME, pixel_offset) # White
             time_blue = time.time()
             synchronization_check()
     # --------------Speed Buttons--------------------------------
         elif button_state_up == Value.INACTIVE:
             print("Button up pressed!")
             increase_speed()
-            for speed in range(125,255,10):
-                Red = speed
-                Green = 0
-                Blue = 125-speed/2
-                command_to_send = {
-                    "seg": [
-                        {
-                            "fx": 227,  # The ID of the effect/pattern
-                            "col": [[0, 255, 0],[Red,Green,Blue],(0,255,0)], # Primary color: Red (R, G, B)
-                            "pal": 63,
-                            "sx": speed,
-                            "ix": 28,
-                        }
-                    ]
-                }
-
-                control_pattern.send_wled_command_udp(config.UDP_IP, config.UDP_PORT, command_to_send)
-                time.sleep(0.1)
+            #for speed in range(125,255,10):
+            command_to_send = {
+                "seg": [
+                    {
+                        #fx = 227 is the ID for sound reactive effect
+                        "fx": 79,  # The ID of the effect/pattern for Chase
+                        "col": [(0,0,255)], # Primary color: Red (R, G, B)
+                        "pal": 63,
+                        "sx": speed,
+                        "ix": 28,
+                    }
+                ]
+            }
+            threading.Thread(target=control_pattern.send_wled_command_udp, args=(config.UDP_IP, config.UDP_PORT, command_to_send), daemon=True).start()
+            #control_pattern.send_wled_command_udp(config.UDP_IP, config.UDP_PORT, command_to_send)
+            time.sleep(2)
+            Standard_heart_animation()
             #color_wipe(pixels, (0, 0, 255), 0.2, 0) 
             
             
@@ -441,11 +500,10 @@ try:
         elif button_state_down == Value.INACTIVE:
             print("Button down pressed!")
             decrease_speed()
-            run_hue_pulse()
-            led.send_udp_color(config.UDP_IP, config.UDP_PORT, 48, 0, 0, 255)
+            #run_hue_pulse()
+            threading.Thread(target=led.send_udp_color, args=(config.UDP_IP, config.UDP_PORT, 48, 0, 0, 255), daemon=True).start()
+            #led.send_udp_color(config.UDP_IP, config.UDP_PORT, 48, 0, 0, 255)
             time.sleep(0.2)
-
-
 
 except KeyboardInterrupt:
     print("Program stopped by user")
